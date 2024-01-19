@@ -25,7 +25,10 @@ function base64ToArrayBuffer(base64: string) {
   return bytes.buffer;
 }
 
-function readFile(blob: Blob, onload) {
+function readFile(
+  blob: Blob,
+  onload: (event: ProgressEvent<FileReader>) => void
+) {
   const reader = new FileReader();
   console.log(`blob=${blob}`);
   if (blob instanceof Blob) {
@@ -36,71 +39,129 @@ function readFile(blob: Blob, onload) {
   }
   return reader;
 }
-type UploadFileType = {
-  blob: blob;
-  base64: string;
-  buff: ArrayBuffer;
-};
+async function readFileAsDataURL(blob: Blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onabort = () => reject(reader.error);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+async function getBase64(blob: Blob) {
+  try {
+    const base64 = await readFileAsDataURL(blob);
+    return base64;
+  } catch (err) {
+    console.log(err);
+  }
+}
+const useBlobFile = (blob: Blob, filename: string) => {
+  // const [file, setFile] = useState(blob);
+  const [contentBase64, setContentBase64] = useState<string>();
+  const [_, setBlob] = useState<Blob>();
 
-const useUploadFile = (blob: Blob) => {
-  const [file, setFile] = useState(blob);
-  const [content, setContent] = useState<string>();
-  const [arrayBuffer, setArrayBuffer] = useState<ArrayBuffer>();
-  const onload = (event: ProgressEvent<FileReader>) => {
-    const binaryStr = event.target?.result;
-    if (binaryStr instanceof ArrayBuffer) {
-      setArrayBuffer(binaryStr);
-      const base64String = arrayBufferToBase64(binaryStr);
-      console.log(base64String);
-      setContent(base64String);
+  setBlob(blob);
+
+  const loadData = async (blob: Blob) => {
+    const buf = await readFileAsDataURL(blob);
+    if (buf instanceof ArrayBuffer) {
+      const base64str = arrayBufferToBase64(buf);
+      setContentBase64(base64str);
     }
   };
-  readFile(file, onload);
+  useEffect(() => {
+    loadData(blob);
+  }, []);
 
-  return { filename: file.name, arrayBuffer, content };
+  return { filename, contentBase64 };
 };
 
-const useFileMgr = () => {
-  [files, setFiles] = useState<UploadFileType[]>([]);
-  const append = (file) => {
-    const newFiles = [...files, { file }];
-    console.log(newFiles);
+type UploadFileType = {
+  file: File;
+  filename?: string;
+  fileSize?: number;
+  base64?: string;
+};
+
+const useUploadFileMgr = () => {
+  const [files, setFiles] = useState<UploadFileType[]>([]);
+  const append = (file: File) => {
+    const fileSize = file.size;
+    const filename = file.name;
+    const newFiles: UploadFileType[] = [...files, { file, filename, fileSize }];
     setFiles(newFiles);
   };
-  return { files, append };
+  const clear = () => {
+    setFiles([]);
+  };
+  const showFileContents = () => {
+    files.map((file) => {
+      readFileAsDataURL(file.file).then((base64) => {
+        console.log(base64);
+      });
+    });
+  };
+  return { files, append, clear, showFileContents };
 };
 
-const FileItem = ({ file }: { file: Blob }) => {
-  const { filename, content } = useUploadFile(file);
+const DownloadableItem = ({
+  filename,
+  contentBase64,
+}: {
+  filename: string;
+  contentBase64: string;
+}) => {
   const downloadBase64File = (content: string, filename: string) => {
     const link = document.createElement("a");
     link.href = `data:application/octet-stream;base64,${content}`;
     link.download = filename;
     link.click();
   };
-  const dummy = "44GT44KM44GvDQrjg4bjgrnjg4gNCuOBp+OBmQ==";
+  // const dummy = "44GT44KM44GvDQrjg4bjgrnjg4gNCuOBp+OBmQ==";
   return (
     <div>
-      <div>{filename}</div>
+      <span>{filename}</span>
       {
         <a
-          href={`data:application/octet-stream;base64,${dummy}`}
+          href={`data:application/octet-stream;base64,${contentBase64}`}
           download={filename}
         >
-          {filename}
+          ダウンロード
         </a>
       }
+      <Button
+        onClick={() => {
+          downloadBase64File(contentBase64, filename);
+        }}
+      >
+        download
+      </Button>
     </div>
   );
 };
 
 // @see https://react-dropzone.js.org/
 export default function MyComponent() {
-  const { files, append } = useFileMgr();
-  const onDrop = useCallback((acceptedFiles) => {
+  const { files: uploadfiles, append, clear } = useUploadFileMgr();
+  const [downloadfile, setDownloadfile] = useState<
+    { content: string; filename: string }[]
+  >([]);
+  const uploadHandler = () => {
+    const files: { content: string; filename: string }[] = [];
+    uploadfiles.forEach((file) => {
+      console.log(file);
+      const content = file.base64 || "";
+      const filename = file.filename || "";
+      files.push({ content, filename });
+    });
+    setDownloadfile(files);
+    clear();
+  };
+  const onDrop = useCallback((acceptedFiles: File[]) => {
     console.log(acceptedFiles);
     acceptedFiles.forEach((file) => {
-      console.log(`append ${file.path}`);
+      console.log(`append ${file.name}`);
       append(file);
     });
   }, []);
@@ -114,15 +175,37 @@ export default function MyComponent() {
       >
         <input {...getInputProps()} />
         {isDragActive ? (
-          <p>Drop the files here ...</p>
+          <p>ドロップしてください ...</p>
         ) : (
-          <p>Drag 'n' drop some files here, or click to select files</p>
+          <p>
+            ここにファイルをドラッグアンドドロップするか,
+            クリックしてファイルを選択してください。
+          </p>
         )}
       </div>
       <div>
-        count={files.length}
-        {files.map((file, index) => (
-          <FileItem key={index} file={file} />
+        count={uploadfiles.length}
+        {uploadfiles.map((file, index) => {
+          return (
+            <div>
+              <span>{file.filename}</span>
+              <span>{file.fileSize}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div>
+        <Button name="button" onClick={uploadHandler}>
+          アップロードする
+        </Button>
+      </div>
+      <div>
+        {downloadfile.map((b, index) => (
+          <DownloadableItem
+            key={index}
+            filename={b.filename}
+            contentBase64={b.content}
+          />
         ))}
       </div>
     </div>
