@@ -89,8 +89,8 @@ const useUploadFileMgr = () => {
   const append = (file: File) => {
     const fileSize = file.size;
     const filename = file.name;
-    const newFiles: UploadFileType[] = [...files, { file, filename, fileSize }];
-    setFiles(newFiles);
+    const newFile: UploadFileType = { file, filename, fileSize };
+    setFiles((prev) => [...prev, newFile]);
   };
   const clear = () => {
     setFiles([]);
