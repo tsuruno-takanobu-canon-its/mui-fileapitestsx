@@ -1,4 +1,11 @@
-import React, { useContext, useEffect, useCallback, useState } from "react";
+import React, {
+  useContext,
+  useEffect,
+  useCallback,
+  useState,
+  DragEventHandler,
+  DragEvent,
+} from "react";
 import "./styles.css";
 import { Button, Radio, FormControlLabel, Box, Tooltip } from "@mui/material";
 import { useDropzone } from "react-dropzone";
@@ -6,7 +13,7 @@ import { useDropzone } from "react-dropzone";
 // ArrayBufferTobase64
 // @see https://stackoverflow.com/questions/9267899/arraybuffer-to-base64-encoded-string
 // @see https://zenn.dev/takaodaze/articles/74ac1684a7d1d2
-function arrayBufferToBase64(buffer: ArrayBuffer) {
+const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
   var binary = "";
   var bytes = new Uint8Array(buffer);
   var len = bytes.byteLength;
@@ -14,8 +21,8 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   return window.btoa(binary);
-}
-function base64ToArrayBuffer(base64: string) {
+};
+const base64ToArrayBuffer = (base64: string) => {
   const binaryString = atob(base64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
@@ -23,39 +30,51 @@ function base64ToArrayBuffer(base64: string) {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes.buffer;
-}
+};
 
-function readFile(
-  blob: Blob,
-  onload: (event: ProgressEvent<FileReader>) => void
-) {
-  const reader = new FileReader();
-  console.log(`blob=${blob}`);
-  if (blob instanceof Blob) {
-    reader.onabort = () => console.log("file reading was aborted");
-    reader.onerror = () => console.log("file reading has failed");
-    reader.onload = onload;
-    reader.readAsArrayBuffer(blob);
-  }
-  return reader;
-}
-async function readFileAsDataURL(blob: Blob) {
-  return new Promise((resolve, reject) => {
+const readFile = async (blob: Blob) => {
+  return new Promise<ArrayBuffer>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onabort = () => reject(reader.error);
-    reader.onerror = () => reject(reader.error);
+    reader.onabort = () => reject("file reading was aborted");
+    reader.onerror = () => reject("file reading has failed");
+    reader.onload = () => {
+      const result = reader.result;
+      if (result instanceof ArrayBuffer) {
+        resolve(result);
+      } else {
+        reject("file reading has failed");
+      }
+    };
+    reader.readAsArrayBuffer(blob);
+  });
+};
+const readBlobAsDataURL = async (blob: Blob): Promise<string> => {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result == "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("file reading has failed"));
+      }
+    };
+    reader.onerror = () => {
+      reader.abort();
+      reject(new Error("file reading has failed"));
+    };
     reader.readAsDataURL(blob);
   });
-}
-async function getBase64(blob: Blob) {
+};
+const getBase64 = async (blob: Blob): Promise<string> => {
   try {
-    const base64 = await readFileAsDataURL(blob);
+    const base64 = await readBlobAsDataURL(blob);
+    console.log(base64);
     return base64;
   } catch (err) {
     console.log(err);
+    return "";
   }
-}
+};
 const useBlobFile = (blob: Blob, filename: string) => {
   // const [file, setFile] = useState(blob);
   const [contentBase64, setContentBase64] = useState<string>();
@@ -64,7 +83,7 @@ const useBlobFile = (blob: Blob, filename: string) => {
   setBlob(blob);
 
   const loadData = async (blob: Blob) => {
-    const buf = await readFileAsDataURL(blob);
+    const buf = await readFile(blob);
     if (buf instanceof ArrayBuffer) {
       const base64str = arrayBufferToBase64(buf);
       setContentBase64(base64str);
@@ -86,10 +105,11 @@ type UploadFileType = {
 
 const useUploadFileMgr = () => {
   const [files, setFiles] = useState<UploadFileType[]>([]);
-  const append = (file: File) => {
+  const append = async (file: File) => {
     const fileSize = file.size;
     const filename = file.name;
-    const newFile: UploadFileType = { file, filename, fileSize };
+    const base64 = await getBase64(file);
+    const newFile: UploadFileType = { file, filename, fileSize, base64 };
     setFiles((prev) => [...prev, newFile]);
   };
   const clear = () => {
@@ -97,7 +117,7 @@ const useUploadFileMgr = () => {
   };
   const showFileContents = () => {
     files.map((file) => {
-      readFileAsDataURL(file.file).then((base64) => {
+      readBlobAsDataURL(file.file).then((base64) => {
         console.log(base64);
       });
     });
@@ -114,7 +134,7 @@ const DownloadableItem = ({
 }) => {
   const downloadBase64File = (content: string, filename: string) => {
     const link = document.createElement("a");
-    link.href = `data:application/octet-stream;base64,${content}`;
+    link.href = content;
     link.download = filename;
     link.click();
   };
@@ -123,15 +143,14 @@ const DownloadableItem = ({
     <div>
       <span>{filename}</span>
       {
-        <a
-          href={`data:application/octet-stream;base64,${contentBase64}`}
-          download={filename}
-        >
+        // リンクでダウロードする場合
+        <a href={contentBase64} download={filename}>
           ダウンロード
         </a>
       }
       <Button
         onClick={() => {
+          // ボタンでダウンロードする場合
           downloadBase64File(contentBase64, filename);
         }}
       >
@@ -161,11 +180,26 @@ export default function MyComponent() {
   const onDrop = useCallback((acceptedFiles: File[]) => {
     console.log(acceptedFiles);
     acceptedFiles.forEach((file) => {
-      console.log(`append ${file.name}`);
+      console.log(`append ${file.name}, ${file.size}, ${file.type}`);
       append(file);
     });
   }, []);
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
+  const onDragOver = useCallback((e: DragEvent<HTMLElement>) => {
+    console.log("onDragOver");
+    e.preventDefault();
+    const items = e.dataTransfer?.items;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i].webkitGetAsEntry();
+      if (item && item.isDirectory) {
+        console.log("item is directory");
+      }
+    }
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    // onDragOver,
+  });
 
   return (
     <div>
@@ -187,7 +221,7 @@ export default function MyComponent() {
         count={uploadfiles.length}
         {uploadfiles.map((file, index) => {
           return (
-            <div>
+            <div key={index}>
               <span>{file.filename}</span>
               <span>{file.fileSize}</span>
             </div>
