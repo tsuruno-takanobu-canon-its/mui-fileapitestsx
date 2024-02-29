@@ -214,6 +214,9 @@ export default function MyComponent() {
           <p>
             ここにファイルをドラッグアンドドロップするか,
             クリックしてファイルを選択してください。
+            <div>
+              <Button>ファイル選択</Button>
+            </div>
           </p>
         )}
       </div>
